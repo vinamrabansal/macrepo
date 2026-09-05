@@ -151,6 +151,61 @@ class SoundEngine {
     osc.start(now);
     osc.stop(now + 0.25);
   }
+
+  /**
+   * Procedural realistic Cow Moo sound effect
+   */
+  playMooSound() {
+    if (this.muted) return;
+    this.initContext();
+    if (!this.ctx) return;
+
+    const now = this.ctx.currentTime;
+    const duration = 1.35;
+
+    // Vocal oscillator (sawtooth with rich harmonics for bovine vocal folds)
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sawtooth';
+
+    // Pitch inflection: gentle upward pitch bend then long slow downward slide
+    osc.frequency.setValueAtTime(122, now);
+    osc.frequency.linearRampToValueAtTime(146, now + 0.28);
+    osc.frequency.exponentialRampToValueAtTime(104, now + duration);
+
+    // Natural vocal vibrato
+    const lfo = this.ctx.createOscillator();
+    const lfoGain = this.ctx.createGain();
+    lfo.type = 'sine';
+    lfo.frequency.setValueAtTime(5.2, now);
+    lfoGain.gain.setValueAtTime(4.2, now);
+    lfo.connect(osc.frequency);
+
+    // Formant vocal tract filter (M -> OOO -> UUU)
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.Q.setValueAtTime(4.2, now);
+
+    filter.frequency.setValueAtTime(260, now);
+    filter.frequency.exponentialRampToValueAtTime(740, now + 0.32);
+    filter.frequency.exponentialRampToValueAtTime(280, now + duration);
+
+    // Volume envelope
+    const masterGain = this.ctx.createGain();
+    masterGain.gain.setValueAtTime(0.001, now);
+    masterGain.gain.linearRampToValueAtTime(0.24, now + 0.12);
+    masterGain.gain.setValueAtTime(0.22, now + 0.9);
+    masterGain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+    osc.connect(filter);
+    filter.connect(masterGain);
+    masterGain.connect(this.ctx.destination);
+
+    lfo.start(now);
+    osc.start(now);
+    lfo.stop(now + duration);
+    osc.stop(now + duration);
+  }
 }
 
 window.SoundEngine = SoundEngine;
+

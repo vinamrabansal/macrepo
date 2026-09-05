@@ -308,6 +308,78 @@ document.addEventListener('DOMContentLoaded', () => {
 
     messagesContainer.appendChild(row);
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+    // Easter Egg: Detect "cow" in message
+    if (msg.text && /\bcows?\b/i.test(msg.text)) {
+      soundEngine.playMooSound();
+      triggerDancingCow(msg.sender || 'Someone');
+    }
+  }
+
+  function triggerDancingCow(senderName) {
+    let overlay = document.getElementById('cowOverlayContainer');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'cowOverlayContainer';
+      overlay.className = 'cow-overlay-container';
+      document.body.appendChild(overlay);
+    }
+
+    const cowWrapper = document.createElement('div');
+    cowWrapper.className = 'dancing-cow-wrapper';
+
+    cowWrapper.innerHTML = `
+      <div class="cow-speech-bubble">
+        <span>🐮</span>
+        <span>MOOOOO! ${escapeHTML(senderName)} typed cow!</span>
+        <span>🎵</span>
+      </div>
+      <div class="cow-actor">
+        <div class="cow-notes">
+          <span class="note-item note-1">🎵</span>
+          <span class="note-item note-2">🎶</span>
+          <span class="note-item note-3">✨</span>
+        </div>
+        <svg class="cow-svg" viewBox="0 0 100 100">
+          <!-- Body with spots -->
+          <ellipse cx="50" cy="62" rx="28" ry="24" fill="#ffffff" stroke="#18181b" stroke-width="2.5"/>
+          <path d="M 38 48 Q 44 58 36 68 Q 28 62 38 48 Z" fill="#18181b"/>
+          <path d="M 60 52 Q 68 58 64 70 Q 54 66 60 52 Z" fill="#18181b"/>
+          <!-- Legs & Hooves -->
+          <rect x="32" y="78" width="8" height="16" rx="4" fill="#ffffff" stroke="#18181b" stroke-width="2"/>
+          <rect x="32" y="88" width="8" height="6" rx="2" fill="#18181b"/>
+          <rect x="60" y="78" width="8" height="16" rx="4" fill="#ffffff" stroke="#18181b" stroke-width="2"/>
+          <rect x="60" y="88" width="8" height="6" rx="2" fill="#18181b"/>
+          <!-- Front hooves doing dance waves -->
+          <ellipse cx="22" cy="58" rx="6" ry="12" fill="#ffffff" stroke="#18181b" stroke-width="2" transform="rotate(-30 22 58)"/>
+          <ellipse cx="78" cy="58" rx="6" ry="12" fill="#ffffff" stroke="#18181b" stroke-width="2" transform="rotate(30 78 58)"/>
+          <!-- Head -->
+          <ellipse cx="50" cy="38" rx="22" ry="18" fill="#ffffff" stroke="#18181b" stroke-width="2.5"/>
+          <!-- Horns -->
+          <path d="M 34 26 C 26 14 36 10 38 22" fill="#f59e0b" stroke="#18181b" stroke-width="2"/>
+          <path d="M 66 26 C 74 14 64 10 62 22" fill="#f59e0b" stroke="#18181b" stroke-width="2"/>
+          <!-- Ears -->
+          <ellipse cx="26" cy="32" rx="9" ry="5" fill="#f43f5e" stroke="#18181b" stroke-width="2" transform="rotate(-20 26 32)"/>
+          <ellipse cx="74" cy="32" rx="9" ry="5" fill="#f43f5e" stroke="#18181b" stroke-width="2" transform="rotate(20 74 32)"/>
+          <!-- Snout / Muzzle -->
+          <ellipse cx="50" cy="46" rx="14" ry="9" fill="#fda4af" stroke="#18181b" stroke-width="2"/>
+          <circle cx="45" cy="46" r="2.2" fill="#18181b"/>
+          <circle cx="55" cy="46" r="2.2" fill="#18181b"/>
+          <!-- Cool Sunglasses -->
+          <polygon points="34,32 48,32 46,39 36,39" fill="#18181b" stroke="#6366f1" stroke-width="1.5"/>
+          <polygon points="52,32 66,32 64,39 54,39" fill="#18181b" stroke="#6366f1" stroke-width="1.5"/>
+          <line x1="48" y1="35" x2="52" y2="35" stroke="#6366f1" stroke-width="2"/>
+        </svg>
+      </div>
+    `;
+
+    overlay.appendChild(cowWrapper);
+
+    setTimeout(() => {
+      if (cowWrapper.parentNode) {
+        cowWrapper.parentNode.removeChild(cowWrapper);
+      }
+    }, 3700);
   }
 
   function formatMessageText(text) {

@@ -1273,7 +1273,133 @@ html, body {
     padding: 12px 16px 16px 16px;
   }
 
-  .invite-pill-btn span {
-    display: none;
+/* ==========================================================================
+   Easter Egg: Dancing Cow Animation
+   ========================================================================== */
+.cow-overlay-container {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 999;
+  overflow: hidden;
+}
+
+.dancing-cow-wrapper {
+  position: absolute;
+  bottom: 40px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  animation: cowPartyFlight 3.6s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+  pointer-events: none;
+  filter: drop-shadow(0 14px 28px rgba(0, 0, 0, 0.45));
+}
+
+.cow-speech-bubble {
+  background: var(--bg-surface-elevated);
+  border: 2px solid var(--accent-primary);
+  color: var(--text-primary);
+  padding: 8px 16px;
+  border-radius: var(--radius-full);
+  font-size: 0.95rem;
+  font-weight: 700;
+  margin-bottom: 12px;
+  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.4);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  animation: speechBounce 0.6s infinite alternate ease-in-out;
+  white-space: nowrap;
+}
+
+.cow-actor {
+  width: 130px;
+  height: 130px;
+  position: relative;
+  animation: cowGroove 0.45s infinite alternate ease-in-out;
+  transform-origin: bottom center;
+}
+
+.cow-svg {
+  width: 100%;
+  height: 100%;
+}
+
+.cow-notes {
+  position: absolute;
+  top: -20px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100%;
+  height: 100%;
+}
+
+.note-item {
+  position: absolute;
+  font-size: 1.4rem;
+  animation: floatNote 1.5s infinite ease-out;
+}
+
+.note-1 { left: -20px; animation-delay: 0s; }
+.note-2 { right: -20px; animation-delay: 0.4s; }
+.note-3 { top: -30px; left: 45%; animation-delay: 0.8s; }
+
+@keyframes cowPartyFlight {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 150px) scale(0.5);
+  }
+  15% {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1.1);
+  }
+  25% {
+    transform: translate(-50%, -10px) scale(1) rotate(-4deg);
+  }
+  45% {
+    transform: translate(-40%, -20px) scale(1.05) rotate(6deg);
+  }
+  65% {
+    transform: translate(-60%, -10px) scale(1) rotate(-6deg);
+  }
+  80% {
+    opacity: 1;
+    transform: translate(-50%, -40px) scale(1.15) rotate(360deg);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -180px) scale(0.3) rotate(720deg);
   }
 }
+
+@keyframes cowGroove {
+  0% {
+    transform: rotate(-10deg) skewX(-4deg) translateY(0);
+  }
+  100% {
+    transform: rotate(10deg) skewX(4deg) translateY(-14px);
+  }
+}
+
+@keyframes speechBounce {
+  0% { transform: scale(0.95) translateY(0); }
+  100% { transform: scale(1.05) translateY(-4px); }
+}
+
+@keyframes floatNote {
+  0% {
+    opacity: 0;
+    transform: translateY(10px) scale(0.5);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-20px) scale(1.2);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-50px) scale(0.8) rotate(20deg);
+  }
+}
+
