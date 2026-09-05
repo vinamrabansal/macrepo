@@ -1,6 +1,6 @@
 /**
- * KeyChat - P2P Network & Mesh Coordinator
- * Handles WebRTC data channels via PeerJS, Local BroadcastChannel, and E2EE mesh routing
+ * KeyChat - Global Realtime Mesh Network (Multi-Transport P2P & WebSocket Mesh)
+ * E2EE AES-256-GCM + MQTT WebSocket Mesh + WebRTC + Local BroadcastChannel
  */
 
 class P2PManager {
@@ -12,46 +12,61 @@ class P2PManager {
     this.peerId = null;
     this.myProfile = { nickname: 'Anonymous', avatarColor: '#6366f1' };
     
-    this.peer = null;
-    this.connections = new Map(); // peerId -> DataConnection
-    this.peersList = new Map(); // peerId -> { nickname, avatarColor, isHost, joinedAt }
-    
+    // Transports
+    this.mqttClient = null;
+    this.mqttConnected = false;
     this.broadcastChannel = null;
-    this.isHost = false;
-    this.hostReconnectTimer = null;
-    this.heartbeatTimer = null;
+    this.peer = null;
+    
+    // State & Roster
+    this.peersList = new Map(); // peerId -> { nickname, avatarColor, isHost, lastSeen, joinedAt }
     this.seenMessageIds = new Set();
+    this.presenceInterval = null;
+    this.pruneInterval = null;
 
-    // Event callbacks
-    this.onMessageReceived = null; // (msgObj) => void
-    this.onPeersUpdated = null; // (peersArray) => void
-    this.onStatusChanged = null; // (statusText, isConnected) => void
-    this.onTypingIndicator = null; // (peerId, isTyping) => void
+    // Public secure MQTT WebSocket brokers (failover list)
+    this.brokers = [
+      { host: 'broker.hivemq.com', port: 8884, path: '/mqtt' },
+      { host: 'broker.emqx.io', port: 8084, path: '/mqtt' }
+    ];
+    this.currentBrokerIndex = 0;
+
+    // Callbacks
+    this.onMessageReceived = null;
+    this.onPeersUpdated = null;
+    this.onStatusChanged = null;
+    this.onTypingIndicator = null;
   }
 
   /**
-   * Connect to room using shared key
+   * Connect to room with shared key
    */
   async joinRoom(sharedKey, profile) {
     this.sharedKey = sharedKey.trim();
     this.myProfile = profile;
     this.roomId = await CryptoManager.deriveRoomId(this.sharedKey);
-    this.peerId = 'peer_' + Math.random().toString(36).substring(2, 8);
+    this.peerId = 'peer_' + Math.random().toString(36).substring(2, 10);
 
-    this.setStatus('Initializing secure room...', false);
+    this.setStatus('Connecting to secure global room...', false);
 
-    // 1. Setup Local Broadcast Channel for instant local tab sync
+    // Register myself in peers roster
+    this.addPeer(this.peerId, this.myProfile, false);
+
+    // 1. Setup Local BroadcastChannel (instant local tab sync)
     this.setupBroadcastChannel();
 
-    // 2. Setup WebRTC PeerJS for internet connectivity
+    // 2. Setup Secure MQTT WebSocket Relay (Global internet connectivity)
+    this.connectMqtt();
+
+    // 3. Setup WebRTC PeerJS mesh in background
     this.setupWebRTC();
 
-    // 3. Start periodic heartbeat to prune dead peers
-    this.startHeartbeat();
+    // 4. Start presence heartbeat & pruning
+    this.startPresenceEngine();
   }
 
   /**
-   * BroadcastChannel for local macOS multi-tab sync
+   * Local BroadcastChannel for instant local macOS multi-tab sync
    */
   setupBroadcastChannel() {
     try {
@@ -61,7 +76,7 @@ class P2PManager {
           await this.handleIncomingRawPayload(event.data, 'local-tab');
         };
 
-        // Announce local presence
+        // Broadcast local presence
         this.broadcastRaw({
           type: 'PEER_ANNOUNCE',
           peerId: this.peerId,
@@ -70,232 +85,145 @@ class P2PManager {
         });
       }
     } catch (e) {
-      console.warn('BroadcastChannel not supported in this browser:', e);
+      console.warn('BroadcastChannel error:', e);
     }
   }
 
   /**
-   * Initialize PeerJS connection and mesh coordinator
+   * Secure MQTT WebSocket Client (Zero-config, global internet sync)
+   */
+  connectMqtt() {
+    if (typeof Paho === 'undefined' || !Paho.MQTT) {
+      console.warn('Paho MQTT library not loaded, using local BroadcastChannel fallback');
+      this.setStatus('Connected (Local Mesh)', true);
+      return;
+    }
+
+    const broker = this.brokers[this.currentBrokerIndex];
+    const clientId = `kc_${this.roomId.substring(0, 6)}_${this.peerId}_${Math.random().toString(36).substring(2, 6)}`;
+
+    try {
+      this.mqttClient = new Paho.MQTT.Client(broker.host, Number(broker.port), broker.path, clientId);
+
+      this.mqttClient.onConnectionLost = (responseObject) => {
+        this.mqttConnected = false;
+        if (responseObject.errorCode !== 0) {
+          console.warn('MQTT connection lost:', responseObject.errorMessage);
+          this.setStatus('Reconnecting to network...', false);
+          // Try next broker
+          this.currentBrokerIndex = (this.currentBrokerIndex + 1) % this.brokers.length;
+          setTimeout(() => this.connectMqtt(), 2000);
+        }
+      };
+
+      this.mqttClient.onMessageArrived = async (message) => {
+        try {
+          const payload = JSON.parse(message.payloadString);
+          await this.handleIncomingRawPayload(payload, 'mqtt');
+        } catch (err) {
+          console.warn('MQTT payload parse error:', err);
+        }
+      };
+
+      this.mqttClient.connect({
+        useSSL: true,
+        timeout: 6,
+        keepAliveInterval: 25,
+        cleanSession: true,
+        onSuccess: () => {
+          this.mqttConnected = true;
+          this.setStatus('Connected (Live E2EE Active)', true);
+
+          // Subscribe to all topics for this room
+          const topic = `keychat/v2/${this.roomId}/#`;
+          this.mqttClient.subscribe(topic, { qos: 1 });
+
+          // Send immediate peer announcement
+          this.sendPresence(true);
+        },
+        onFailure: (err) => {
+          console.warn(`MQTT connect failed to ${broker.host}:`, err);
+          this.mqttConnected = false;
+          // Failover to next broker
+          this.currentBrokerIndex = (this.currentBrokerIndex + 1) % this.brokers.length;
+          setTimeout(() => this.connectMqtt(), 1500);
+        }
+      });
+    } catch (e) {
+      console.warn('Failed to initialize MQTT client:', e);
+    }
+  }
+
+  /**
+   * Optional WebRTC PeerJS mesh setup
    */
   setupWebRTC() {
-    if (typeof Peer === 'undefined') {
-      console.warn('PeerJS library not loaded, using local BroadcastChannel fallback');
-      this.setStatus('Connected (Local Mesh)', true);
-      this.addPeer(this.peerId, this.myProfile, false);
-      return;
-    }
+    if (typeof Peer === 'undefined') return;
 
-    const hostPeerId = `kc-${this.roomId}-host`;
-    const clientPeerId = `kc-${this.roomId}-${this.peerId}`;
-
-    this.setStatus('Connecting to WebRTC mesh...', false);
-
-    // Try becoming host first
-    this.tryBecomeHost(hostPeerId, clientPeerId);
-  }
-
-  tryBecomeHost(hostPeerId, clientPeerId) {
     try {
-      const p = new Peer(hostPeerId, {
+      const p = new Peer(`kc-${this.roomId}-${this.peerId}`, {
         config: {
           iceServers: [
             { urls: 'stun:stun.l.google.com:19302' },
-            { urls: 'stun:stun1.l.google.com:19302' },
-            { urls: 'stun:stun2.l.google.com:19302' }
+            { urls: 'stun:stun1.l.google.com:19302' }
           ]
         },
-        debug: 1
+        debug: 0
       });
 
-      p.on('open', (id) => {
+      p.on('open', () => {
         this.peer = p;
-        this.isHost = true;
-        this.peerId = id;
-        this.setStatus('Connected (Room Coordinator & E2EE Active)', true);
-        this.addPeer(this.peerId, this.myProfile, true);
-        this.setupPeerListeners();
       });
 
-      p.on('error', (err) => {
-        if (err.type === 'unavailable-id') {
-          // Host already exists! Join as client and connect to host
-          p.destroy();
-          this.joinAsClient(clientPeerId, hostPeerId);
-        } else {
-          console.warn('PeerJS error as host:', err);
-          p.destroy();
-          this.joinAsClient(clientPeerId, hostPeerId);
-        }
+      p.on('error', (e) => {
+        console.warn('PeerJS background mesh error:', e);
       });
     } catch (e) {
-      console.warn('Failed to initialize PeerJS host:', e);
-      this.joinAsClient(clientPeerId, hostPeerId);
+      console.warn('PeerJS init failed:', e);
     }
-  }
-
-  joinAsClient(clientPeerId, hostPeerId) {
-    try {
-      const p = new Peer(clientPeerId, {
-        config: {
-          iceServers: [
-            { urls: 'stun:stun.l.google.com:19302' },
-            { urls: 'stun:stun1.l.google.com:19302' },
-            { urls: 'stun:stun2.l.google.com:19302' }
-          ]
-        },
-        debug: 1
-      });
-
-      p.on('open', (id) => {
-        this.peer = p;
-        this.isHost = false;
-        this.peerId = id;
-        this.setStatus('Connecting to room host...', false);
-        this.addPeer(this.peerId, this.myProfile, false);
-        this.setupPeerListeners();
-
-        // Connect directly to host
-        this.connectToPeer(hostPeerId, true);
-      });
-
-      p.on('error', (err) => {
-        console.warn('PeerJS client error:', err);
-        if (err.type === 'peer-unavailable') {
-          // Host might have left, try becoming host again
-          this.scheduleHostElection(hostPeerId, clientPeerId);
-        }
-      });
-    } catch (e) {
-      console.warn('Failed to initialize PeerJS client:', e);
-      this.setStatus('Connected (Local Offline Mesh)', true);
-    }
-  }
-
-  setupPeerListeners() {
-    if (!this.peer) return;
-
-    this.peer.on('connection', (conn) => {
-      this.handleIncomingConnection(conn);
-    });
-
-    this.peer.on('disconnected', () => {
-      this.setStatus('Reconnecting to network...', false);
-      try {
-        this.peer.reconnect();
-      } catch (e) {
-        console.warn('Peer reconnect failed:', e);
-      }
-    });
-
-    this.peer.on('close', () => {
-      this.setStatus('Disconnected', false);
-    });
-  }
-
-  connectToPeer(targetPeerId, isHostTarget = false) {
-    if (!this.peer || targetPeerId === this.peerId || this.connections.has(targetPeerId)) {
-      return;
-    }
-
-    try {
-      const conn = this.peer.connect(targetPeerId, {
-        reliable: true,
-        metadata: { profile: this.myProfile, from: this.peerId }
-      });
-
-      this.handleOutgoingConnection(conn, isHostTarget);
-    } catch (e) {
-      console.warn(`Failed to connect to ${targetPeerId}:`, e);
-    }
-  }
-
-  handleOutgoingConnection(conn, isHostTarget) {
-    conn.on('open', () => {
-      this.connections.set(conn.peer, conn);
-      this.setStatus('Connected (Live P2P & E2EE Active)', true);
-
-      // Send greeting & profile
-      this.sendToConn(conn, {
-        type: 'PEER_ANNOUNCE',
-        peerId: this.peerId,
-        profile: this.myProfile,
-        timestamp: Date.now()
-      });
-    });
-
-    conn.on('data', async (data) => {
-      await this.handleIncomingRawPayload(data, conn.peer);
-    });
-
-    conn.on('close', () => {
-      this.handlePeerDisconnected(conn.peer);
-      if (isHostTarget) {
-        this.scheduleHostElection(`kc-${this.roomId}-host`, `kc-${this.roomId}-${this.peerId}`);
-      }
-    });
-
-    conn.on('error', (err) => {
-      console.warn(`Connection error with ${conn.peer}:`, err);
-      this.handlePeerDisconnected(conn.peer);
-    });
-  }
-
-  handleIncomingConnection(conn) {
-    conn.on('open', () => {
-      this.connections.set(conn.peer, conn);
-      this.setStatus('Connected (Live P2P & E2EE Active)', true);
-
-      // If I am host, announce current peer mesh list to the new connection
-      if (this.isHost) {
-        const peerList = Array.from(this.peersList.entries()).map(([id, data]) => ({
-          peerId: id,
-          profile: { nickname: data.nickname, avatarColor: data.avatarColor },
-          isHost: data.isHost
-        }));
-
-        this.sendToConn(conn, {
-          type: 'MESH_ROSTER',
-          peers: peerList,
-          timestamp: Date.now()
-        });
-      }
-
-      // Send my own profile back
-      this.sendToConn(conn, {
-        type: 'PEER_ANNOUNCE',
-        peerId: this.peerId,
-        profile: this.myProfile,
-        isHost: this.isHost,
-        timestamp: Date.now()
-      });
-    });
-
-    conn.on('data', async (data) => {
-      await this.handleIncomingRawPayload(data, conn.peer);
-    });
-
-    conn.on('close', () => {
-      this.handlePeerDisconnected(conn.peer);
-    });
-
-    conn.on('error', (err) => {
-      console.warn(`Incoming connection error with ${conn.peer}:`, err);
-      this.handlePeerDisconnected(conn.peer);
-    });
-  }
-
-  scheduleHostElection(hostPeerId, clientPeerId) {
-    if (this.hostReconnectTimer) clearTimeout(this.hostReconnectTimer);
-    this.hostReconnectTimer = setTimeout(() => {
-      if (this.peer && !this.peer.destroyed) {
-        this.peer.destroy();
-      }
-      this.tryBecomeHost(hostPeerId, clientPeerId);
-    }, 1200 + Math.random() * 1000);
   }
 
   /**
-   * Send encrypted message to all connected peers and broadcast channel
+   * Start periodic presence heartbeat & roster cleanup
+   */
+  startPresenceEngine() {
+    // Send presence heartbeat every 4 seconds
+    this.presenceInterval = setInterval(() => {
+      this.sendPresence(false);
+    }, 4000);
+
+    // Prune peers who haven't pinged in > 10 seconds
+    this.pruneInterval = setInterval(() => {
+      const now = Date.now();
+      let changed = false;
+
+      for (const [pId, data] of this.peersList.entries()) {
+        if (pId !== this.peerId && now - data.lastSeen > 10000) {
+          this.peersList.delete(pId);
+          changed = true;
+          if (this.sound) this.sound.playLeaveSound();
+        }
+      }
+
+      if (changed) {
+        this.notifyPeersUpdated();
+      }
+    }, 3000);
+  }
+
+  sendPresence(isAnnounce = false) {
+    const payload = {
+      type: isAnnounce ? 'PEER_ANNOUNCE' : 'PEER_HEARTBEAT',
+      roomId: this.roomId,
+      peerId: this.peerId,
+      profile: this.myProfile,
+      timestamp: Date.now()
+    };
+    this.broadcastRaw(payload, `keychat/v2/${this.roomId}/presence`);
+  }
+
+  /**
+   * Send encrypted message across all network transports
    */
   async sendMessage(content, attachments = []) {
     const msgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
@@ -312,18 +240,19 @@ class P2PManager {
 
     this.seenMessageIds.add(msgId);
 
-    // Encrypt payload with AES-GCM
+    // Encrypt payload with AES-256-GCM
     const encrypted = await this.crypto.encrypt(this.sharedKey, plainObj);
 
-    // Envelope with room hash
+    // Envelope
     const payload = {
       roomId: this.roomId,
       senderId: this.peerId,
-      encrypted: encrypted
+      encrypted: encrypted,
+      timestamp: Date.now()
     };
 
-    // Broadcast across all transports
-    this.broadcastRaw(payload);
+    // Broadcast
+    this.broadcastRaw(payload, `keychat/v2/${this.roomId}/messages`);
 
     // Play local send sound
     if (this.sound) this.sound.playSendSound();
@@ -332,7 +261,7 @@ class P2PManager {
   }
 
   /**
-   * Broadcast typing state
+   * Send typing state
    */
   async sendTyping(isTyping) {
     const payload = {
@@ -344,75 +273,57 @@ class P2PManager {
       timestamp: Date.now()
     };
 
-    this.broadcastRaw(payload);
+    this.broadcastRaw(payload, `keychat/v2/${this.roomId}/typing`);
   }
 
   /**
-   * Broadcast raw object to all WebRTC connections + BroadcastChannel
+   * Broadcast payload across MQTT and BroadcastChannel
    */
-  broadcastRaw(payload) {
-    // 1. BroadcastChannel (local tabs)
+  broadcastRaw(payload, topic) {
+    const targetTopic = topic || `keychat/v2/${this.roomId}/general`;
+    const jsonStr = JSON.stringify(payload);
+
+    // 1. MQTT WebSocket
+    if (this.mqttClient && this.mqttConnected) {
+      try {
+        const message = new Paho.MQTT.Message(jsonStr);
+        message.destinationName = targetTopic;
+        message.qos = 1;
+        this.mqttClient.send(message);
+      } catch (e) {
+        console.warn('MQTT publish error:', e);
+      }
+    }
+
+    // 2. BroadcastChannel (local tabs on same Mac)
     if (this.broadcastChannel) {
       try {
         this.broadcastChannel.postMessage(payload);
       } catch (e) {
-        console.warn('BroadcastChannel post failed:', e);
-      }
-    }
-
-    // 2. WebRTC DataConnections
-    for (const [pId, conn] of this.connections.entries()) {
-      if (conn.open) {
-        try {
-          conn.send(payload);
-        } catch (e) {
-          console.warn(`WebRTC send failed to ${pId}:`, e);
-        }
-      }
-    }
-  }
-
-  sendToConn(conn, payload) {
-    if (conn && conn.open) {
-      try {
-        conn.send(payload);
-      } catch (e) {
-        console.warn('Send to conn failed:', e);
+        console.warn('BroadcastChannel error:', e);
       }
     }
   }
 
   /**
-   * Process raw payload from any transport
+   * Handle incoming raw payload from any transport
    */
-  async handleIncomingRawPayload(payload, fromSource) {
+  async handleIncomingRawPayload(payload, source) {
     if (!payload) return;
 
-    // Ignore messages from myself
+    // Ignore messages sent by myself
     if (payload.senderId === this.peerId) return;
 
-    // Case 1: Unencrypted signaling / presence
-    if (payload.type === 'PEER_ANNOUNCE') {
-      this.addPeer(payload.peerId, payload.profile, payload.isHost);
-      // Connect to peer directly if not already connected (full mesh)
-      if (payload.peerId !== this.peerId && !this.connections.has(payload.peerId) && this.peer) {
-        this.connectToPeer(payload.peerId);
-      }
+    // Check room ID
+    if (payload.roomId && payload.roomId !== this.roomId) return;
+
+    // 1. Presence & Heartbeat
+    if (payload.type === 'PEER_ANNOUNCE' || payload.type === 'PEER_HEARTBEAT') {
+      this.addPeer(payload.peerId, payload.profile, false);
       return;
     }
 
-    if (payload.type === 'MESH_ROSTER' && Array.isArray(payload.peers)) {
-      payload.peers.forEach((p) => {
-        if (p.peerId !== this.peerId) {
-          this.addPeer(p.peerId, p.profile, p.isHost);
-          if (!this.connections.has(p.peerId) && this.peer) {
-            this.connectToPeer(p.peerId);
-          }
-        }
-      });
-      return;
-    }
-
+    // 2. Typing indicator
     if (payload.type === 'TYPING_STATE') {
       if (this.onTypingIndicator) {
         this.onTypingIndicator(payload.sender, payload.isTyping);
@@ -420,8 +331,8 @@ class P2PManager {
       return;
     }
 
-    // Case 2: Encrypted Chat Payload
-    if (payload.encrypted && payload.roomId === this.roomId) {
+    // 3. Encrypted Chat Message
+    if (payload.encrypted) {
       try {
         const decrypted = await this.crypto.decrypt(this.sharedKey, payload.encrypted);
         
@@ -434,18 +345,9 @@ class P2PManager {
           if (this.onMessageReceived) {
             this.onMessageReceived(decrypted);
           }
-
-          // If host, forward to other peers who might not be directly connected
-          if (this.isHost) {
-            for (const [pId, conn] of this.connections.entries()) {
-              if (pId !== fromSource && conn.open) {
-                this.sendToConn(conn, payload);
-              }
-            }
-          }
         }
       } catch (err) {
-        console.warn('Received payload that could not be decrypted. Wrong key?', err);
+        console.warn('Payload decryption failed. Mismatched shared key?', err);
       }
     }
   }
@@ -453,12 +355,13 @@ class P2PManager {
   addPeer(peerId, profile, isHost = false) {
     if (!peerId) return;
     const isNew = !this.peersList.has(peerId);
+
     this.peersList.set(peerId, {
       nickname: (profile && profile.nickname) || 'Anonymous',
       avatarColor: (profile && profile.avatarColor) || '#6366f1',
       isHost: isHost,
-      joinedAt: Date.now(),
-      lastSeen: Date.now()
+      lastSeen: Date.now(),
+      joinedAt: isNew ? Date.now() : (this.peersList.get(peerId).joinedAt || Date.now())
     });
 
     if (isNew && peerId !== this.peerId) {
@@ -466,17 +369,6 @@ class P2PManager {
     }
 
     this.notifyPeersUpdated();
-  }
-
-  handlePeerDisconnected(peerId) {
-    if (this.connections.has(peerId)) {
-      this.connections.delete(peerId);
-    }
-    if (this.peersList.has(peerId)) {
-      this.peersList.delete(peerId);
-      if (this.sound) this.sound.playLeaveSound();
-      this.notifyPeersUpdated();
-    }
   }
 
   notifyPeersUpdated() {
@@ -498,30 +390,36 @@ class P2PManager {
     }
   }
 
-  startHeartbeat() {
-    this.heartbeatTimer = setInterval(() => {
-      // Clean up seen message ID cache if it grows too large
-      if (this.seenMessageIds.size > 2000) {
-        this.seenMessageIds.clear();
-      }
-    }, 30000);
-  }
-
   leave() {
+    // Send leave notice
+    if (this.mqttClient && this.mqttConnected) {
+      try {
+        const leaveMsg = new Paho.MQTT.Message(JSON.stringify({
+          type: 'PEER_LEAVE',
+          roomId: this.roomId,
+          peerId: this.peerId
+        }));
+        leaveMsg.destinationName = `keychat/v2/${this.roomId}/presence`;
+        this.mqttClient.send(leaveMsg);
+        this.mqttClient.disconnect();
+      } catch (e) {}
+    }
+
     if (this.broadcastChannel) {
       try {
         this.broadcastChannel.close();
       } catch (e) {}
     }
+
     if (this.peer) {
       try {
         this.peer.destroy();
       } catch (e) {}
     }
-    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
-    if (this.hostReconnectTimer) clearTimeout(this.hostReconnectTimer);
 
-    this.connections.clear();
+    if (this.presenceInterval) clearInterval(this.presenceInterval);
+    if (this.pruneInterval) clearInterval(this.pruneInterval);
+
     this.peersList.clear();
     this.setStatus('Disconnected', false);
   }
