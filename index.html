@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>KeyChat — Private Shared-Key Realtime Chat</title>
+  <meta name="description" content="Aesthetic, zero-config real-time chat between anyone with a shared key. End-to-end encrypted with Web Crypto & WebRTC.">
+  <meta name="theme-color" content="#09090b">
+
+  <!-- Favicon -->
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🔑</text></svg>">
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="css/style.css">
+
+  <!-- PeerJS WebRTC Library -->
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js" defer></script>
+  <!-- QRCode.js Library -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" defer></script>
+</head>
+<body>
+
+  <!-- Ambient Glow Effect -->
+  <div class="ambient-background">
+    <div class="ambient-orb ambient-orb-1"></div>
+    <div class="ambient-orb ambient-orb-2"></div>
+  </div>
+
+  <div id="app">
+    <!-- ====================================================================
+         1. Entry / Connect View (Modal Overlay)
+         ==================================================================== -->
+    <div id="entryContainer" class="entry-container">
+      <div class="entry-card">
+        <div class="brand-header">
+          <div class="brand-badge">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect width="18" height="11" x="3" y="11" rx="2" ry="2"/>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+            </svg>
+            End-to-End Encrypted (AES-256)
+          </div>
+          <h1 class="brand-title">KeyChat</h1>
+          <p class="brand-subtitle">Enter a shared key with your friend or team to start chatting instantly across the internet.</p>
+        </div>
+
+        <form id="joinForm">
+          <!-- Shared Key Input -->
+          <div class="form-group">
+            <div class="form-label">
+              <span>Shared Room Key</span>
+              <button type="button" id="btnRandomKey" class="label-action" title="Generate random key">
+                🎲 Generate Random Key
+              </button>
+            </div>
+            <div class="input-wrapper">
+              <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="m21 2-2 2m-1.5 1.5L14 9l-1.5-1.5-3 3 1.5 1.5L8 15l-1.5-1.5-3 3 1.5 1.5L3 20l1 1 5-5 1.5 1.5 3-3-1.5-1.5 3-3 1.5 1.5 3.5-3.5"/>
+              </svg>
+              <input type="password" id="inputSharedKey" class="text-input mono" placeholder="e.g. crimson-falcon-4281" required autocomplete="off" spellcheck="false">
+              <button type="button" id="btnToggleKeyVisibility" class="input-action-btn" title="Toggle key visibility">
+                <svg id="eyeIcon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/>
+                  <circle cx="12" cy="12" r="3"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- Nickname Input -->
+          <div class="form-group">
+            <div class="form-label">
+              <span>Your Nickname</span>
+            </div>
+            <div class="input-wrapper">
+              <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/>
+                <circle cx="12" cy="7" r="4"/>
+              </svg>
+              <input type="text" id="inputNickname" class="text-input" placeholder="e.g. Alex" maxlength="24" required>
+            </div>
+          </div>
+
+          <!-- Avatar Color Swatches -->
+          <div class="form-group">
+            <div class="form-label">
+              <span>Avatar Color</span>
+            </div>
+            <div class="avatar-selection-row">
+              <div class="color-swatches" id="colorSwatches">
+                <div class="color-swatch active" data-color="#6366f1" style="background: #6366f1;"></div>
+                <div class="color-swatch" data-color="#8b5cf6" style="background: #8b5cf6;"></div>
+                <div class="color-swatch" data-color="#ec4899" style="background: #ec4899;"></div>
+                <div class="color-swatch" data-color="#f43f5e" style="background: #f43f5e;"></div>
+                <div class="color-swatch" data-color="#f59e0b" style="background: #f59e0b;"></div>
+                <div class="color-swatch" data-color="#10b981" style="background: #10b981;"></div>
+                <div class="color-swatch" data-color="#06b6d4" style="background: #06b6d4;"></div>
+                <div class="color-swatch" data-color="#3b82f6" style="background: #3b82f6;"></div>
+              </div>
+            </div>
+          </div>
+
+          <button type="submit" id="btnJoinRoom" class="btn-primary">
+            <span>Connect to Room</span>
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M5 12h14"/>
+              <path d="m12 5 7 7-7 7"/>
+            </svg>
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <!-- ====================================================================
+         2. Main Chat Workspace
+         ==================================================================== -->
+    <div id="chatWorkspace" class="chat-workspace">
+      
+      <!-- Left Sidebar -->
+      <aside id="sidebar" class="sidebar">
+        <div class="sidebar-header">
+          <div class="app-brand">
+            <div class="app-logo">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect width="18" height="11" x="3" y="11" rx="2" ry="2"/>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+              </svg>
+            </div>
+            <span class="app-name">KeyChat</span>
+          </div>
+
+          <button id="btnCloseSidebar" class="btn-icon mobile-menu-btn" title="Close sidebar">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 6 6 18M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+
+        <!-- Room Security Badge Card -->
+        <div class="room-info-card">
+          <div class="room-security-status">
+            <div class="security-badge">
+              <span class="dot"></span>
+              <span>E2EE Active</span>
+            </div>
+            <span class="peer-count-pill" id="badgeRoomId">Room: ...</span>
+          </div>
+
+          <div class="shared-key-display">
+            <span class="key-text" id="sidebarKeyText">••••••••••••</span>
+            <div class="key-actions">
+              <button id="btnSidebarCopyKey" class="key-action-btn" title="Copy shared key">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect width="14" height="14" x="8" y="8" rx="2" ry="2"/>
+                  <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Connected Peers List -->
+        <div class="peers-section">
+          <div class="section-title">
+            <span>Peers Online</span>
+            <span class="peer-count-pill" id="peersCountBadge">1</span>
+          </div>
+
+          <ul class="peer-list" id="peerList">
+            <!-- Dynamically populated -->
+          </ul>
+        </div>
+
+        <!-- Sidebar Footer -->
+        <div class="sidebar-footer">
+          <div class="my-profile-mini">
+            <div class="peer-avatar" id="myAvatarMini" style="background: #6366f1;">A</div>
+            <div class="peer-details">
+              <div class="peer-name" id="myNameMini">Alex</div>
+              <div class="peer-status-sub">Online (Local/P2P)</div>
+            </div>
+          </div>
+
+          <div class="footer-actions">
+            <button id="btnLeaveRoom" class="btn-icon" title="Leave room">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                <polyline points="16 17 21 12 16 7"/>
+                <line x1="21" x2="9" y1="12" y2="12"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Main Chat Area -->
+      <main class="chat-main">
+        
+        <!-- Header -->
+        <header class="chat-header">
+          <div class="chat-header-left">
+            <button id="btnOpenSidebar" class="btn-icon mobile-menu-btn" title="Open menu">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="4" x2="20" y1="12" y2="12"/>
+                <line x1="4" x2="20" y1="6" y2="6"/>
+                <line x1="4" x2="20" y1="18" y2="18"/>
+              </svg>
+            </button>
+
+            <div class="room-title-area">
+              <h2 id="headerRoomTitle">Shared Key Room</h2>
+              <div class="connection-pulse">
+                <span class="status-dot connected" id="statusDot"></span>
+                <span id="statusText">Connected</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="chat-header-actions">
+            <button id="btnOpenInviteModal" class="invite-pill-btn" title="Invite with key or QR code">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+                <circle cx="9" cy="7" r="4"/>
+                <line x1="19" x2="19" y1="8" y2="14"/>
+                <line x1="22" x2="16" y1="11" y2="11"/>
+              </svg>
+              <span>Share Key / Invite</span>
+            </button>
+
+            <button id="btnToggleAudio" class="btn-icon" title="Toggle sound effects">
+              <svg id="soundIcon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+              </svg>
+            </button>
+
+            <button id="btnToggleTheme" class="btn-icon" title="Toggle theme">
+              <svg id="themeIcon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="5"/>
+                <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+              </svg>
+            </button>
+
+            <button id="btnClearChat" class="btn-icon" title="Clear local chat log">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M3 6h18m-2 0v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6m3 0V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
+              </svg>
+            </button>
+          </div>
+        </header>
+
+        <!-- Messages Feed -->
+        <div class="messages-container" id="messagesContainer">
+          <div class="room-welcome-banner">
+            <div class="welcome-icon-shield">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+              </svg>
+            </div>
+            <h3 class="welcome-title">Zero-Knowledge Encrypted Channel</h3>
+            <p class="welcome-desc">
+              All messages, images, and typing events are encrypted using <strong>AES-256-GCM</strong> directly on your device. Only peers with your exact shared key can read them.
+            </p>
+          </div>
+        </div>
+
+        <!-- Typing Indicator -->
+        <div class="typing-indicator-bar" id="typingIndicator" style="visibility: hidden;">
+          <div class="typing-dots">
+            <span class="typing-dot"></span>
+            <span class="typing-dot"></span>
+            <span class="typing-dot"></span>
+          </div>
+          <span id="typingText">Someone is typing...</span>
+        </div>
+
+        <!-- Image Attachment Preview Bar -->
+        <div class="attachment-preview-bar" id="attachmentPreviewBar">
+          <img id="attachmentThumb" class="attachment-thumb" src="" alt="Attachment">
+          <span class="attachment-info" id="attachmentInfo">image.png</span>
+          <button type="button" id="btnRemoveAttachment" class="attachment-remove-btn" title="Remove attachment">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 6 6 18M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+
+        <!-- Input Area -->
+        <div class="chat-input-container">
+          <form id="chatForm">
+            <div class="input-box-wrapper">
+              <div class="input-actions-left">
+                <input type="file" id="imageFileInput" accept="image/*" style="display: none;">
+                <button type="button" id="btnAttachImage" class="btn-icon" title="Send image">
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect width="18" height="18" x="3" y="3" rx="2" ry="2"/>
+                    <circle cx="9" cy="9" r="2"/>
+                    <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>
+                  </svg>
+                </button>
+              </div>
+
+              <textarea 
+                id="chatInput" 
+                class="chat-textarea" 
+                rows="1" 
+                placeholder="Type an encrypted message... (Enter to send, Shift+Enter for newline)"
+                autocomplete="off"
+              ></textarea>
+
+              <div class="input-actions-right">
+                <button type="submit" id="btnSendMessage" class="send-btn" title="Send message">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="m22 2-7 20-4-9-9-4Z"/>
+                    <path d="M22 2 11 13"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
+
+      </main>
+    </div>
+
+    <!-- ====================================================================
+         3. Share / Invite Modal
+         ==================================================================== -->
+    <div id="inviteModal" class="modal-overlay">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3 class="modal-title">Share Room Key</h3>
+          <button type="button" id="btnCloseInviteModal" class="modal-close-btn">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 6 6 18M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+
+        <p class="brand-subtitle" style="margin-bottom: 16px;">
+          Anyone with this shared key or invite link can join this conversation from any device over the internet.
+        </p>
+
+        <!-- QR Code Display -->
+        <div class="qr-canvas-container">
+          <div id="qrCodeWrapper"></div>
+        </div>
+
+        <!-- Shared Key Box -->
+        <div class="form-group" style="margin-top: 14px;">
+          <div class="form-label">
+            <span>Shared Key</span>
+          </div>
+          <div class="input-wrapper">
+            <input type="text" id="modalKeyInput" class="text-input mono" readonly>
+            <button type="button" id="btnModalCopyKey" class="input-action-btn" title="Copy Key">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                <rect width="14" height="14" x="8" y="8" rx="2" ry="2"/>
+                <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Invite Link Box -->
+        <div class="form-group">
+          <div class="form-label">
+            <span>1-Click Invite URL</span>
+          </div>
+          <div class="input-wrapper">
+            <input type="text" id="modalLinkInput" class="text-input" readonly>
+            <button type="button" id="btnModalCopyLink" class="input-action-btn" title="Copy Link">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                <rect width="14" height="14" x="8" y="8" rx="2" ry="2"/>
+                <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <button type="button" id="btnCopyInviteAll" class="btn-primary" style="margin-top: 16px;">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+            <rect width="14" height="14" x="8" y="8" rx="2" ry="2"/>
+            <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>
+          </svg>
+          <span>Copy Invite Link</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toastContainer"></div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="js/crypto.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/p2p.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+{
+  "name": "keychat",
+  "version": "1.0.0",
+  "description": "A modern, aesthetic, zero-config real-time chat app with shared keys and end-to-end encryption.",
+  "main": "index.html",
+  "scripts": {
+    "dev": "python3 -m http.server 3000",
+    "start": "python3 -m http.server 3000",
+    "serve": "npx serve ."
+  },
+  "keywords": [
+    "chat",
+    "webrtc",
+    "e2ee",
+    "realtime",
+    "p2p",
+    "modern-ui",
+    "vercel"
+  ],
+  "author": "KeyChat",
+  "license": "MIT"
+}
